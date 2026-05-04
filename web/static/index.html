@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blackout Mapper - Interactive GIS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div id="map"></div>
+
+    <div class="map-overlay glass">
+        <label style="font-size:11px; font-weight: 800; color:var(--text-main); text-transform:uppercase;">Map
+            Controls</label>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap: 16px; margin-top: 8px;">
+            <label style="font-size:12px; font-weight: 600; color:var(--primary);">Vis Mode</label>
+            <select id="mapType"
+                style="background:rgba(255,255,255,0.1); width: 140px; color:white; border:1px solid rgba(255,255,255,0.2); border-radius:6px; padding:6px; outline:none; font-size:12px;">
+                <option value="standard" style="color:black;">🗺️ Standard</option>
+                <option value="heatmap" style="color:black;">🔥 Heatmap</option>
+            </select>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap: 16px;">
+            <label style="font-size:12px; font-weight: 600; color:var(--primary);">Date Filter</label>
+            <input type="date" id="dateFilter"
+                style="background:rgba(255,255,255,0.1); width: 140px; color:white; border:1px solid rgba(255,255,255,0.2); border-radius:6px; padding:6px; outline:none; font-size:12px; color-scheme:dark;" />
+        </div>
+    </div>
+
+    <div class="sidebar glass">
+        <header>
+            <h1>⚡ KPLC Blackouts</h1>
+            <p>Live Geographic Schedule Tracking</p>
+        </header>
+
+        <div class="stats glass-inner">
+            <div class="stat-item">
+                <span class="label">Recorded Zones</span>
+                <span class="value" id="totalZones">--</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Counties</span>
+                <span class="value" id="totalCounties">--</span>
+            </div>
+        </div>
+
+        <div class="search-bar glass-inner">
+            <input type="text" id="search" placeholder="Search areas..." />
+        </div>
+
+        <ul class="blackout-list" id="blackoutList">
+            <div class="loader">Loading Map Data...</div>
+        </ul>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

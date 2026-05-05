@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,7 +32,7 @@ const (
 	OutFileFormat        = "out/%s.json"
 	GeminiModel          = "gemini-flash-latest"
 	GenAIPromptMessage   = "Extract blackout details"
-	NominatimURLTemplate = "https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1"
+	NominatimURLTemplate = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ke"
 	UserAgentName        = "blackoutd-bot/1.0"
 
 	systemPrompt = `You are an expert GIS Data Extraction AI. Scan the provided PDF of power maintenance schedules and extract the blackout details strictly according to the following JSON schema. 
@@ -41,14 +41,14 @@ ALL FIELDS ARE MANDATORY. If actual coordinates are not in the document, you MUS
 Schema:
 [
   {
-    "region": "string",
-    "county": "string",
-    "area": "string",
+    "region": "string (Must be a real location, cleaned of any extraneous words like 'Region' or 'Area', 'Part of', etc.)",
+    "county": "string (Must be a real location, cleaned of any extraneous words like 'Region' or 'Area', 'Part of', etc.)",
+    "area": "string (Must be a real location, cleaned of any extraneous words like 'Region' or 'Area', 'Part of', etc.)",
     "date": "string",
     "time": "string",
     "detailed": [
       {
-        "location": "string",
+        "location": "string (Must be a real location, cleaned of any extraneous words like 'Region' or 'Area', 'Part of', etc.)",
         "type": "string",
         "coordinates": [
            {
@@ -92,37 +92,37 @@ type NominatimResult struct {
 }
 
 func Start(apiKey string) {
-	log.Println("Starting initial ingestion...")
 	runIngestion(apiKey)
 
 	ticker := time.NewTicker(1 * time.Hour)
-	go func() {
-		for range ticker.C {
-			log.Println("Running scheduled ingestion...")
-			runIngestion(apiKey)
-		}
-	}()
+	defer ticker.Stop()
+	for range ticker.C {
+		slog.Info("Running scheduled ingestion")
+		runIngestion(apiKey)
+	}
 }
 
 func runIngestion(apiKey string) {
+	slog.Info("Starting initial ingestion")
+
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
-		log.Println("Failed to create genai client:", err)
+		slog.Error("Failed to create genai client", "err", err)
 		return
 	}
 	defer client.Close()
 
 	res, err := http.Get(TargetURL)
 	if err != nil {
-		log.Println("Failed fetching customer-support page:", err)
+		slog.Error("Failed fetching customer-support page", "err", err)
 		return
 	}
 	defer res.Body.Close()
 
 	doc, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		log.Println("Failed to read HTML:", err)
+		slog.Error("Failed to read HTML", "err", err)
 		return
 	}
 
@@ -130,7 +130,7 @@ func runIngestion(apiKey string) {
 	now := time.Now()
 	os.MkdirAll(OutputDir, 0755)
 
-	doc.Find(LinkSelector).Each(func(i int, s *goquery.Selection) {
+	doc.Find(LinkSelector).Each(func(_ int, s *goquery.Selection) {
 		link, exists := s.Attr("href")
 		if !exists || !strings.HasSuffix(strings.ToLower(link), PdfExtension) {
 			return
@@ -150,7 +150,7 @@ func runIngestion(apiKey string) {
 		}
 
 		if err := processPDF(ctx, client, link, t); err != nil {
-			log.Printf("Error processing %s: %v\n", link, err)
+			slog.Error("Error processing PDF", "link", link, "err", err)
 		}
 	})
 }
@@ -162,7 +162,7 @@ func processPDF(ctx context.Context, client *genai.Client, link string, t time.T
 		return nil
 	}
 
-	log.Printf("Processing new PDF link: %s (Date: %s)\n", link, t.Format(FileDateFormat))
+	slog.Info("Processing new PDF link", "link", link, "date", t.Format(FileDateFormat))
 
 	res, err := http.Get(link)
 	if err != nil {
@@ -214,7 +214,7 @@ func processPDF(ctx context.Context, client *genai.Client, link string, t time.T
 	var notices []BlackoutNotice
 	if err := json.Unmarshal([]byte(rawJSON), &notices); err != nil {
 		os.WriteFile(outPath, []byte(rawJSON), 0644)
-		log.Printf("Warning: Failed to unmarshal LLM format but raw written to %s\n", outPath)
+		slog.Warn("Failed to unmarshal LLM format, raw output saved", "outPath", outPath, "err", err)
 		return nil
 	}
 
@@ -223,8 +223,10 @@ func processPDF(ctx context.Context, client *genai.Client, link string, t time.T
 
 	for idxNotice, notice := range notices {
 		for idxDetail, detail := range notice.Detailed {
-			query := fmt.Sprintf("%s, %s, Kenya", detail.Location, notice.County)
-			apiURL := fmt.Sprintf(NominatimURLTemplate, url.QueryEscape(query))
+			apiURL := buildNominatimURL(detail, notice)
+			if apiURL == "" {
+				continue
+			}
 
 			<-rateLimiter.C
 
@@ -245,12 +247,16 @@ func processPDF(ctx context.Context, client *genai.Client, link string, t time.T
 				continue
 			}
 
-			lat, _ := strconv.ParseFloat(nomResults[0].Lat, 64)
-			lon, _ := strconv.ParseFloat(nomResults[0].Lon, 64)
-			if lat != 0 && lon != 0 {
-				notices[idxNotice].Detailed[idxDetail].Coordinates = []Coordinate{
-					{Lat: lat, Long: lon, Source: "OSM"},
+			var coords []Coordinate
+			for _, result := range nomResults {
+				lat, _ := strconv.ParseFloat(result.Lat, 64)
+				lon, _ := strconv.ParseFloat(result.Lon, 64)
+				if lat != 0 && lon != 0 {
+					coords = append(coords, Coordinate{Lat: lat, Long: lon, Source: "OSM"})
 				}
+			}
+			if len(coords) > 0 {
+				notices[idxNotice].Detailed[idxDetail].Coordinates = coords
 			}
 			osResp.Body.Close()
 		}
@@ -258,7 +264,26 @@ func processPDF(ctx context.Context, client *genai.Client, link string, t time.T
 
 	finalBytes, _ := json.MarshalIndent(notices, "", "  ")
 	os.WriteFile(outPath, finalBytes, 0644)
-	log.Printf("Successfully saved parsed data to %s\n", outPath)
+	slog.Info("Successfully saved parsed data", "outPath", outPath)
 
 	return nil
+}
+
+func buildNominatimURL(detail DetailedLocation, notice BlackoutNotice) string {
+	if detail.Location == "" {
+		return ""
+	}
+
+	u, _ := url.Parse(NominatimURLTemplate)
+	q := u.Query()
+	parts := []string{detail.Location, notice.Area, notice.County, notice.Region, "Kenya"}
+	var filtered []string
+	for _, p := range parts {
+		if p != "" {
+			filtered = append(filtered, p)
+		}
+	}
+	q.Set("q", strings.Join(filtered, ", "))
+	u.RawQuery = q.Encode()
+	return u.String()
 }

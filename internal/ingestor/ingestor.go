@@ -33,7 +33,7 @@ const (
 	GeminiModel          = "gemini-flash-latest"
 	GenAIPromptMessage   = "Extract blackout details"
 	NominatimURLTemplate = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ke"
-	UserAgentName        = "blackoutd-bot/1.0"
+	UserAgentName        = "github.com/oyamo/blackoutd-bot/1.0"
 
 	systemPrompt = `You are an expert GIS Data Extraction AI. Scan the provided PDF of power maintenance schedules and extract the blackout details strictly according to the following JSON schema. 
 ALL FIELDS ARE MANDATORY. If actual coordinates are not in the document, you MUST estimate the [longitude, latitude] based on your prior geographical knowledge of the localities in Kenya.

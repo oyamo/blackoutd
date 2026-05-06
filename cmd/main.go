@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"os"
 
-	"blackoutd/internal/api"
-	"blackoutd/internal/ingestor"
+	"github.com/oyamo/blackoutd/internal/api"
+	"github.com/oyamo/blackoutd/internal/ingestor"
 
 	"github.com/joho/godotenv"
 )

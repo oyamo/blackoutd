@@ -1,4 +1,4 @@
-module blackoutd
+module github.com/oyamo/blackoutd
 
 go 1.26.2
 
